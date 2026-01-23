@@ -1,12 +1,22 @@
 # llm9p
 
-An LLM (Claude) exposed as a 9P filesystem.
+LLM access via the 9P filesystem protocol.
 
-llm9p enables users, scripts, and AI agents to interact with an LLM through standard filesystem operations. Write a prompt to a file, read the response from the same file.
+llm9p enables users, scripts, and AI agents to interact with Large Language Models through standard filesystem operations. Write a prompt to a file, read the response from the same file. Supports multiple backends including Anthropic API, Claude Code CLI, and local LLMs (planned).
+
+## Supported Backends
+
+| Backend | Status | Description |
+|---------|--------|-------------|
+| **Anthropic API** | Available | Direct API access with your API key |
+| **Claude Code CLI** | Available | Uses Claude Max subscription via `claude` command |
+| **Local LLMs (Ollama)** | Planned | Run models locally without cloud dependencies |
+
+The pluggable backend architecture makes it easy to add new LLM providers.
 
 ## What is 9P?
 
-9P is a simple, lightweight network filesystem protocol originally developed for Plan 9 from Bell Labs. It lets you access remote resources as if they were local files. This means you can interact with Claude using basic file operations (`cat`, `echo`, `>`, `<`) instead of SDKs or HTTP APIs.
+9P is a simple, lightweight network filesystem protocol originally developed for Plan 9 from Bell Labs. It lets you access remote resources as if they were local files. This means you can interact with LLMs using basic file operations (`cat`, `echo`, `>`, `<`) instead of SDKs or HTTP APIs.
 
 **Why use 9P for LLM access?**
 - **Universal**: Any language or tool that can read/write files can use it
@@ -250,7 +260,7 @@ cat /mnt/llm/ask
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
+| `ANTHROPIC_API_KEY` | For `api` backend | Your Anthropic API key |
 
 ## Default Settings
 
@@ -271,7 +281,9 @@ cat /mnt/llm/ask
 ## Requirements
 
 - Go 1.21+
-- Anthropic API key
+- LLM backend (one of the following):
+  - Anthropic API key (for `api` backend)
+  - Claude Code CLI with Max subscription (for `cli` backend)
 - 9P client (one of the following):
   - [plan9port](https://9fans.github.io/plan9port/) - Plan 9 tools for Unix (macOS, Linux)
   - [Infernode](https://github.com/NERVsystems/infernode) - Hosted Inferno OS with native 9P
@@ -356,8 +368,8 @@ echo $ANTHROPIC_API_KEY
 1. **Server starts**: llm9p listens for 9P connections on the specified port
 2. **Client connects**: A 9P client (9pfuse, Infernode, etc.) connects and negotiates the protocol
 3. **Filesystem exposed**: The client sees a virtual filesystem with files like `ask`, `model`, `tokens`
-4. **Write prompt**: Writing to `ask` sends the text to Claude via the Anthropic API
-5. **Read response**: Reading from `ask` returns Claude's response
+4. **Write prompt**: Writing to `ask` sends the text to the configured LLM backend
+5. **Read response**: Reading from `ask` returns the LLM's response
 6. **State persists**: Conversation history is maintained until you write to `new`
 
 The 9P protocol handles all the complexity of making this look like a regular filesystem, so any tool that can read and write files can interact with the LLM.
