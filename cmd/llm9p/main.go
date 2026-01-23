@@ -4,6 +4,10 @@
 //
 //	ANTHROPIC_API_KEY=sk-... llm9p -addr :5640
 //
+// Or with Claude Max subscription (via Claude Code CLI):
+//
+//	llm9p -addr :5640 -backend cli
+//
 // Mount with:
 //
 //	9pfuse localhost:5640 /mnt/llm
@@ -21,6 +25,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -32,17 +37,37 @@ import (
 func main() {
 	addr := flag.String("addr", ":5640", "Address to listen on")
 	debug := flag.Bool("debug", false, "Enable debug logging")
+	backend := flag.String("backend", "api", "Backend to use: 'api' (Anthropic API) or 'cli' (Claude Code CLI for Max subscription)")
 	flag.Parse()
 
-	// Get API key from environment
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		fmt.Fprintln(os.Stderr, "Error: ANTHROPIC_API_KEY environment variable not set")
+	var client llm.Backend
+
+	switch *backend {
+	case "cli":
+		// Check that claude CLI is available
+		if _, err := exec.LookPath("claude"); err != nil {
+			fmt.Fprintln(os.Stderr, "Error: 'claude' CLI not found in PATH")
+			fmt.Fprintln(os.Stderr, "Install Claude Code CLI or use -backend api with ANTHROPIC_API_KEY")
+			os.Exit(1)
+		}
+		client = llm.NewCLIClient()
+		log.Println("Using Claude Code CLI backend (Claude Max subscription)")
+
+	case "api":
+		// Get API key from environment
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "Error: ANTHROPIC_API_KEY environment variable not set")
+			fmt.Fprintln(os.Stderr, "Set ANTHROPIC_API_KEY or use -backend cli for Claude Max subscription")
+			os.Exit(1)
+		}
+		client = llm.NewClient(apiKey)
+		log.Println("Using Anthropic API backend")
+
+	default:
+		fmt.Fprintf(os.Stderr, "Error: unknown backend '%s' (use 'api' or 'cli')\n", *backend)
 		os.Exit(1)
 	}
-
-	// Create LLM client
-	client := llm.NewClient(apiKey)
 
 	// Create filesystem
 	root := llmfs.NewRoot(client)

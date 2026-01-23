@@ -13,13 +13,13 @@ import (
 // AskFile is the main interaction file - write a prompt, read the response
 type AskFile struct {
 	*protocol.BaseFile
-	client       *llm.Client
+	client       llm.Backend
 	mu           sync.RWMutex
 	lastResponse string
 }
 
 // NewAskFile creates the ask file
-func NewAskFile(client *llm.Client) *AskFile {
+func NewAskFile(client llm.Backend) *AskFile {
 	return &AskFile{
 		BaseFile: protocol.NewBaseFile("ask", 0666),
 		client:   client,

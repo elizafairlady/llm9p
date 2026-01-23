@@ -13,11 +13,11 @@ import (
 // Write: appends a system message to context
 type ContextFile struct {
 	*protocol.BaseFile
-	client *llm.Client
+	client llm.Backend
 }
 
 // NewContextFile creates the context file
-func NewContextFile(client *llm.Client) *ContextFile {
+func NewContextFile(client llm.Backend) *ContextFile {
 	return &ContextFile{
 		BaseFile: protocol.NewBaseFile("context", 0666),
 		client:   client,

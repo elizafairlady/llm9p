@@ -10,8 +10,11 @@ This guide is for Claude Code and developers working on the llm9p codebase.
 # Build
 go build -o llm9p ./cmd/llm9p
 
-# Run
+# Run with Anthropic API
 ANTHROPIC_API_KEY=sk-... ./llm9p -addr :5640
+
+# Run with Claude Max subscription (via CLI)
+./llm9p -addr :5640 -backend cli
 
 # Run with debug logging
 ANTHROPIC_API_KEY=sk-... ./llm9p -addr :5640 -debug
@@ -86,11 +89,13 @@ llm9p/
    - No external dependencies (stdlib only)
    - `File` and `Dir` interfaces define the filesystem abstraction
 
-2. **LLM Client (`internal/llm/client.go`)**
-   - Wraps Anthropic SDK
+2. **LLM Client (`internal/llm/`)**
+   - `backend.go` - Backend interface for swappable LLM providers
+   - `client.go` - Anthropic API client (requires API key)
+   - `cli_client.go` - Claude Code CLI client (uses Max subscription)
    - Manages conversation state
    - Supports both sync and streaming responses
-   - Tracks token usage
+   - Tracks token usage (API only)
 
 3. **LLM Filesystem (`internal/llmfs/`)**
    - Implements each file in the LLM filesystem
@@ -321,6 +326,15 @@ The following scenarios have been tested and verified working:
 - [x] EOF returned when stream completes
 - [x] Short response ("Write a haiku") streams correctly
 - [x] Long response ("Count 1 to 20") streams all content
+
+### CLI Backend (Claude Max subscription)
+- [x] Server starts with `-backend cli` flag
+- [x] Model returns "sonnet" (normalized name)
+- [x] `echo "What is 2+2?" | 9p write ask` returns correct answer
+- [x] Multi-turn conversation maintains context
+- [x] Model switching works (haiku, sonnet, opus)
+- [x] Conversation reset works via `new` file
+- [x] System messages work via `context` file
 
 ## Future Enhancements
 

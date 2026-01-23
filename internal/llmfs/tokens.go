@@ -11,11 +11,11 @@ import (
 // TokensFile exposes the last response token count (read-only)
 type TokensFile struct {
 	*protocol.BaseFile
-	client *llm.Client
+	client llm.Backend
 }
 
 // NewTokensFile creates the tokens file
-func NewTokensFile(client *llm.Client) *TokensFile {
+func NewTokensFile(client llm.Backend) *TokensFile {
 	return &TokensFile{
 		BaseFile: protocol.NewBaseFile("tokens", 0444),
 		client:   client,

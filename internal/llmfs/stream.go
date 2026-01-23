@@ -14,11 +14,11 @@ import (
 // Returns EOF when the stream is complete
 type ChunkFile struct {
 	*protocol.BaseFile
-	client *llm.Client
+	client llm.Backend
 }
 
 // NewChunkFile creates the stream/chunk file
-func NewChunkFile(client *llm.Client) *ChunkFile {
+func NewChunkFile(client llm.Backend) *ChunkFile {
 	return &ChunkFile{
 		BaseFile: protocol.NewBaseFile("chunk", 0444),
 		client:   client,
@@ -58,11 +58,11 @@ func (f *ChunkFile) Stat() protocol.Stat {
 // Write a prompt to start streaming, then read chunks from stream/chunk
 type StreamAskFile struct {
 	*protocol.BaseFile
-	client *llm.Client
+	client llm.Backend
 }
 
 // NewStreamAskFile creates the stream/ask file
-func NewStreamAskFile(client *llm.Client) *StreamAskFile {
+func NewStreamAskFile(client llm.Backend) *StreamAskFile {
 	return &StreamAskFile{
 		BaseFile: protocol.NewBaseFile("ask", 0222), // write-only
 		client:   client,

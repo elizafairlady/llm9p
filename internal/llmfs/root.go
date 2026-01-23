@@ -7,7 +7,7 @@ import (
 )
 
 // NewRoot creates the root directory of the LLM filesystem
-func NewRoot(client *llm.Client) protocol.Dir {
+func NewRoot(client llm.Backend) protocol.Dir {
 	root := protocol.NewStaticDir("llm")
 
 	// Add all files

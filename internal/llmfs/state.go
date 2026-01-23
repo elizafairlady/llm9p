@@ -13,11 +13,11 @@ import (
 // ModelFile exposes the current model name (read/write)
 type ModelFile struct {
 	*protocol.BaseFile
-	client *llm.Client
+	client llm.Backend
 }
 
 // NewModelFile creates the model file
-func NewModelFile(client *llm.Client) *ModelFile {
+func NewModelFile(client llm.Backend) *ModelFile {
 	return &ModelFile{
 		BaseFile: protocol.NewBaseFile("model", 0666),
 		client:   client,
@@ -51,11 +51,11 @@ func (f *ModelFile) Stat() protocol.Stat {
 // TemperatureFile exposes the current temperature (read/write)
 type TemperatureFile struct {
 	*protocol.BaseFile
-	client *llm.Client
+	client llm.Backend
 }
 
 // NewTemperatureFile creates the temperature file
-func NewTemperatureFile(client *llm.Client) *TemperatureFile {
+func NewTemperatureFile(client llm.Backend) *TemperatureFile {
 	return &TemperatureFile{
 		BaseFile: protocol.NewBaseFile("temperature", 0666),
 		client:   client,

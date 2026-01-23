@@ -8,11 +8,11 @@ import (
 // NewFile is a write-only file that resets the conversation when written to
 type NewFile struct {
 	*protocol.BaseFile
-	client *llm.Client
+	client llm.Backend
 }
 
 // NewNewFile creates the new file
-func NewNewFile(client *llm.Client) *NewFile {
+func NewNewFile(client llm.Backend) *NewFile {
 	return &NewFile{
 		BaseFile: protocol.NewBaseFile("new", 0222),
 		client:   client,

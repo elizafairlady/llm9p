@@ -32,10 +32,26 @@ go build -o llm9p ./cmd/llm9p
 
 ### Start the Server
 
+**Option A: Using Anthropic API** (requires API key)
+
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ./llm9p -addr :5640
 ```
+
+**Option B: Using Claude Max Subscription** (via Claude Code CLI)
+
+If you have a Claude Max subscription and the Claude Code CLI installed:
+
+```bash
+./llm9p -addr :5640 -backend cli
+```
+
+This uses your Claude Max subscription instead of API tokens. No API key required.
+
+**Requirements for CLI backend:**
+- Claude Code CLI installed and authenticated (`claude` command available)
+- Active Claude Max subscription
 
 ### Mount the Filesystem
 
@@ -219,6 +235,7 @@ cat /mnt/llm/ask
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-addr` | `:5640` | Address to listen on |
+| `-backend` | `api` | Backend: `api` (Anthropic API) or `cli` (Claude Code CLI) |
 | `-debug` | `false` | Enable debug logging |
 
 ### Environment Variables
@@ -229,9 +246,19 @@ cat /mnt/llm/ask
 
 ## Default Settings
 
-- **Model**: `claude-sonnet-4-20250514`
+- **Model**: `claude-sonnet-4-20250514` (API) or `sonnet` (CLI)
 - **Temperature**: `0.7`
 - **Max Tokens**: `4096`
+
+### Backend Differences
+
+| Feature | API Backend | CLI Backend |
+|---------|-------------|-------------|
+| Authentication | API key required | Claude Max subscription |
+| Token counting | Accurate | Not available (always 0) |
+| Model names | Full names | Aliases (opus, sonnet, haiku) |
+| Streaming | True streaming | Simulated (full response) |
+| Rate limits | API limits apply | Subscription limits apply |
 
 ## Requirements
 
