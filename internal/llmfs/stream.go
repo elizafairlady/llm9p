@@ -1,7 +1,9 @@
 package llmfs
 
 import (
+	"context"
 	"io"
+	"strings"
 
 	"github.com/NERVsystems/llm9p/internal/llm"
 	"github.com/NERVsystems/llm9p/internal/protocol"
@@ -50,4 +52,43 @@ func (f *ChunkFile) Stat() protocol.Stat {
 	// Length is unknown for streaming
 	s.Length = 0
 	return s
+}
+
+// StreamAskFile starts a streaming request
+// Write a prompt to start streaming, then read chunks from stream/chunk
+type StreamAskFile struct {
+	*protocol.BaseFile
+	client *llm.Client
+}
+
+// NewStreamAskFile creates the stream/ask file
+func NewStreamAskFile(client *llm.Client) *StreamAskFile {
+	return &StreamAskFile{
+		BaseFile: protocol.NewBaseFile("ask", 0222), // write-only
+		client:   client,
+	}
+}
+
+func (f *StreamAskFile) Read(p []byte, offset int64) (int, error) {
+	return 0, protocol.ErrPermission
+}
+
+func (f *StreamAskFile) Write(p []byte, offset int64) (int, error) {
+	prompt := strings.TrimSpace(string(p))
+	if prompt == "" {
+		return len(p), nil
+	}
+
+	// Start streaming - chunks will be available via stream/chunk
+	err := f.client.StartStream(context.Background(), prompt)
+	if err != nil {
+		// Return error to indicate stream failed to start
+		return 0, err
+	}
+
+	return len(p), nil
+}
+
+func (f *StreamAskFile) Stat() protocol.Stat {
+	return f.BaseFile.Stat()
 }

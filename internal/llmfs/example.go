@@ -25,9 +25,11 @@ Conversation Management:
 Token Usage:
   cat tokens                     # View tokens from last response
 
-Streaming (Advanced):
-  echo "Tell me a story" > ask   # Start generating
-  cat stream/chunk               # Read chunks as they arrive (blocks)
+Streaming:
+  echo "Tell me a story" > stream/ask  # Start streaming request
+  cat stream/chunk                      # Read next chunk (blocks until available)
+  # Keep reading stream/chunk until EOF for full response
+  # Note: Read chunks immediately after writing to stream/ask
 
 Shell Scripting:
   #!/bin/sh
@@ -46,14 +48,15 @@ Environment:
   ANTHROPIC_API_KEY must be set when starting the server
 
 Files:
-  ask          Read/write: prompt goes in, response comes out
+  ask          Read/write: prompt goes in, response comes out (sync)
   model        Read/write: current model name
   temperature  Read/write: sampling temperature (0.0-2.0)
   tokens       Read-only: token count from last response
   new          Write-only: any write resets conversation
   context      Read: JSON history; Write: add system message
   _example     Read-only: this help text
-  stream/chunk Read-only: streaming chunks (blocking)
+  stream/ask   Write-only: starts a streaming request
+  stream/chunk Read-only: returns next chunk (blocks), EOF when done
 `
 
 // NewExampleFile creates the _example file with usage examples

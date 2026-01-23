@@ -313,6 +313,15 @@ The following scenarios have been tested and verified working:
 - [x] `echo 'prompt' > /n/llm/ask` followed by `cat /n/llm/ask` - Full LLM interaction works
 - [x] LLM correctly identifies client as Inferno OS when asked
 
+### Streaming (plan9port)
+- [x] `ls stream` - Lists `ask` and `chunk` files
+- [x] `echo "prompt" | 9p write stream/ask` - Starts streaming request
+- [x] `9p read stream/chunk` - Returns streamed chunks
+- [x] Multiple chunks received for longer responses
+- [x] EOF returned when stream completes
+- [x] Short response ("Write a haiku") streams correctly
+- [x] Long response ("Count 1 to 20") streams all content
+
 ## Future Enhancements
 
 - [ ] Multiple conversation support (via subdirectories)

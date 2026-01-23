@@ -21,6 +21,7 @@ func NewRoot(client *llm.Client) protocol.Dir {
 
 	// Add stream directory
 	streamDir := protocol.NewStaticDir("stream")
+	streamDir.AddChild(NewStreamAskFile(client))
 	streamDir.AddChild(NewChunkFile(client))
 	root.AddChild(streamDir)
 

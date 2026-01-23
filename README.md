@@ -150,21 +150,52 @@ cat /mnt/llm/_example
 ├── context          # Read: conversation history; Write: add system message
 ├── _example         # Read-only: usage examples
 └── stream/          # Streaming interface
-    └── chunk        # Read blocks until next chunk, EOF on completion
+    ├── ask          # Write-only: starts a streaming request
+    └── chunk        # Read-only: blocks until next chunk, EOF on completion
 ```
 
 ### File Behaviors
 
 | File | Read | Write |
 |------|------|-------|
-| `ask` | Returns last LLM response | Sends prompt to LLM, stores response |
+| `ask` | Returns last LLM response | Sends prompt to LLM (sync), stores response |
 | `model` | Returns current model name | Sets model for subsequent requests |
 | `temperature` | Returns current temperature | Sets temperature (0.0-2.0) |
 | `tokens` | Returns last response token count | Permission denied |
 | `new` | Permission denied | Any write resets conversation state |
 | `context` | Returns JSON conversation history | Appends system message to context |
 | `_example` | Returns usage examples | Permission denied |
+| `stream/ask` | Permission denied | Starts a streaming request |
 | `stream/chunk` | Blocks until next chunk, returns it | Permission denied |
+
+## Streaming
+
+For long responses, use the streaming interface to see output as it's generated:
+
+```bash
+# Start a streaming request (using 9p tool)
+echo "Write a poem about the moon" | 9p -a localhost:5640 write stream/ask &
+
+# Read chunks as they arrive
+while chunk=$(9p -a localhost:5640 read stream/chunk 2>/dev/null); do
+  [ -z "$chunk" ] && break
+  printf "%s" "$chunk"
+done
+```
+
+With a mounted filesystem:
+
+```bash
+# Start streaming in background
+echo "Explain quantum computing" > /mnt/llm/stream/ask &
+
+# Read chunks
+while read -r chunk < /mnt/llm/stream/chunk 2>/dev/null; do
+  printf "%s" "$chunk"
+done
+```
+
+**Note:** Start reading chunks immediately after writing to `stream/ask`. If you wait too long, the stream may complete and you'll get EOF.
 
 ## Shell Scripting
 
