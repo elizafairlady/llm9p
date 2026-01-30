@@ -18,8 +18,19 @@ type Backend interface {
 	SystemPrompt() string
 	// SetSystemPrompt sets the system prompt
 	SetSystemPrompt(prompt string)
+	// ThinkingTokens returns the thinking token budget (-1=max, 0=disabled, >0=budget)
+	ThinkingTokens() int
+	// SetThinkingTokens sets the thinking token budget
+	SetThinkingTokens(tokens int)
 	// LastTokens returns token count from last response
 	LastTokens() int
+	// TotalTokens returns cumulative token count for this conversation
+	TotalTokens() int
+	// ContextLimit returns the model's context window limit
+	ContextLimit() int
+	// Compact summarizes the conversation to reduce token usage
+	// The conversation history is replaced with a summary
+	Compact(ctx context.Context) error
 	// Messages returns conversation history
 	Messages() []Message
 	// MessagesJSON returns conversation history as JSON

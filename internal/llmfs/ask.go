@@ -3,12 +3,16 @@ package llmfs
 import (
 	"context"
 	"io"
+	"log"
 	"strings"
 	"sync"
 
 	"github.com/NERVsystems/llm9p/internal/llm"
 	"github.com/NERVsystems/llm9p/internal/protocol"
 )
+
+// CompactThreshold is the percentage of context limit at which auto-compaction triggers
+const CompactThreshold = 0.80
 
 // AskFile is the main interaction file - write a prompt, read the response
 type AskFile struct {
@@ -49,8 +53,27 @@ func (f *AskFile) Write(p []byte, offset int64) (int, error) {
 		return len(p), nil // Empty write is a no-op
 	}
 
+	ctx := context.Background()
+
+	// Check if we need to auto-compact before processing
+	tokens := f.client.TotalTokens()
+	limit := f.client.ContextLimit()
+	threshold := int(float64(limit) * CompactThreshold)
+
+	if tokens > threshold {
+		log.Printf("llm9p: auto-compacting at %d/%d tokens (%.0f%% threshold)",
+			tokens, limit, CompactThreshold*100)
+		if err := f.client.Compact(ctx); err != nil {
+			log.Printf("llm9p: auto-compact failed: %v", err)
+			// Continue anyway - better to try than to fail
+		} else {
+			log.Printf("llm9p: auto-compact complete, now at %d tokens",
+				f.client.TotalTokens())
+		}
+	}
+
 	// Make the API call
-	response, err := f.client.Ask(context.Background(), prompt)
+	response, err := f.client.Ask(ctx, prompt)
 	if err != nil {
 		// Store error as response so it can be read
 		f.mu.Lock()

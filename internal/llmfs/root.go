@@ -18,7 +18,10 @@ func NewRoot(client llm.Backend) protocol.Dir {
 	root.AddChild(NewTokensFile(client))
 	root.AddChild(NewNewFile(client))
 	root.AddChild(NewContextFile(client))
+	root.AddChild(NewThinkingFile(client))
 	root.AddChild(NewExampleFile())
+	root.AddChild(NewUsageFile(client))
+	root.AddChild(NewCompactFile(client))
 
 	// Add stream directory
 	streamDir := protocol.NewStaticDir("stream")

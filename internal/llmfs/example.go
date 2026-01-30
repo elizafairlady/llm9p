@@ -26,6 +26,9 @@ Conversation Management:
 
 Token Usage:
   cat tokens                     # View tokens from last response
+  cat usage                      # View total/limit (e.g., "45000/200000")
+  echo "1" > compact             # Manually trigger conversation compaction
+  cat compact                    # Check compaction status
 
 Streaming:
   echo "Tell me a story" > stream/ask  # Start streaming request
@@ -55,11 +58,17 @@ Files:
   temperature  Read/write: sampling temperature (0.0-2.0)
   system       Read/write: system prompt (persists across resets)
   tokens       Read-only: token count from last response
+  usage        Read-only: total tokens/limit (e.g., "45000/200000")
+  compact      Read/write: write to trigger compaction, read for status
   new          Write-only: any write resets conversation (keeps system prompt)
   context      Read: JSON history; Write: add system message to history
   _example     Read-only: this help text
   stream/ask   Write-only: starts a streaming request
   stream/chunk Read-only: returns next chunk (blocks), EOF when done
+
+Auto-Compaction:
+  When tokens exceed 80% of context limit, the conversation is automatically
+  summarized before processing the next query. This is transparent to the client.
 `
 
 // NewExampleFile creates the _example file with usage examples

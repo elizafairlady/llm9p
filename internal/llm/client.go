@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -19,16 +20,18 @@ type Message struct {
 
 // Client wraps the Anthropic API client with conversation state
 type Client struct {
-	client       anthropic.Client
-	mu           sync.RWMutex
-	model        string
-	temperature  float64
-	systemPrompt string
-	messages     []Message
-	lastTokens   int
-	streaming    bool
-	streamChan   chan string
-	streamDone   chan struct{}
+	client         anthropic.Client
+	mu             sync.RWMutex
+	model          string
+	temperature    float64
+	systemPrompt   string
+	messages       []Message
+	lastTokens     int
+	totalTokens    int // cumulative token count for context tracking
+	thinkingTokens int // 0 = disabled, >0 = budget, -1 = max (default for CLI, not used for API yet)
+	streaming      bool
+	streamChan     chan string
+	streamDone     chan struct{}
 }
 
 // NewClient creates a new LLM client
@@ -72,6 +75,22 @@ func (c *Client) SetTemperature(temp float64) error {
 	defer c.mu.Unlock()
 	c.temperature = temp
 	return nil
+}
+
+// ThinkingTokens returns the current thinking token budget
+// Note: API backend does not currently use extended thinking
+func (c *Client) ThinkingTokens() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.thinkingTokens
+}
+
+// SetThinkingTokens sets the thinking token budget
+// Note: API backend does not currently use extended thinking
+func (c *Client) SetThinkingTokens(tokens int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.thinkingTokens = tokens
 }
 
 // SystemPrompt returns the current system prompt
@@ -125,6 +144,94 @@ func (c *Client) Reset() {
 	defer c.mu.Unlock()
 	c.messages = make([]Message, 0)
 	c.lastTokens = 0
+	c.totalTokens = 0
+}
+
+// TotalTokens returns cumulative token count for this conversation
+func (c *Client) TotalTokens() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.totalTokens
+}
+
+// ContextLimit returns the model's context window limit
+func (c *Client) ContextLimit() int {
+	c.mu.RLock()
+	model := c.model
+	c.mu.RUnlock()
+	return contextLimitForModel(model)
+}
+
+// Compact summarizes the conversation to reduce token usage
+func (c *Client) Compact(ctx context.Context) error {
+	c.mu.Lock()
+	if len(c.messages) < 4 {
+		c.mu.Unlock()
+		return nil // Not enough to compact
+	}
+
+	// Build conversation text for summarization
+	var conversationText string
+	for _, msg := range c.messages {
+		if msg.Role == "system" {
+			continue // Don't include system messages in summary
+		}
+		conversationText += fmt.Sprintf("%s: %s\n\n", msg.Role, msg.Content)
+	}
+
+	model := c.model
+	c.mu.Unlock()
+
+	// Use a compact summarization prompt
+	summaryPrompt := "Summarize this conversation concisely, preserving key facts, decisions, and context needed to continue:\n\n" + conversationText
+
+	// Build API request for summarization
+	apiMessages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock(summaryPrompt)),
+	}
+
+	params := anthropic.MessageNewParams{
+		Model:     anthropic.Model(model),
+		MaxTokens: 2048,
+		Messages:  apiMessages,
+	}
+
+	response, err := c.client.Messages.New(ctx, params)
+	if err != nil {
+		return fmt.Errorf("compaction failed: %w", err)
+	}
+
+	// Extract summary
+	var summary string
+	for _, block := range response.Content {
+		if block.Type == "text" {
+			summary += block.Text
+		}
+	}
+
+	// Replace conversation with summary
+	c.mu.Lock()
+	c.messages = []Message{{Role: "system", Content: "Previous conversation summary: " + summary}}
+	c.totalTokens = int(response.Usage.InputTokens + response.Usage.OutputTokens)
+	c.mu.Unlock()
+
+	return nil
+}
+
+// contextLimitForModel returns the context window size for a model
+func contextLimitForModel(model string) int {
+	model = strings.ToLower(model)
+	// Claude models and their context limits
+	switch {
+	case strings.Contains(model, "opus"):
+		return 200000
+	case strings.Contains(model, "sonnet"):
+		return 200000
+	case strings.Contains(model, "haiku"):
+		return 200000
+	default:
+		return 200000 // Default to 200K for newer Claude models
+	}
 }
 
 // Ask sends a prompt to the LLM and returns the response
@@ -203,6 +310,7 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 	c.mu.Lock()
 	c.messages = append(c.messages, Message{Role: "assistant", Content: responseText})
 	c.lastTokens = int(response.Usage.InputTokens + response.Usage.OutputTokens)
+	c.totalTokens += c.lastTokens
 	c.mu.Unlock()
 
 	return responseText, nil
@@ -325,6 +433,7 @@ func (c *Client) StartStream(ctx context.Context, prompt string) error {
 		c.mu.Lock()
 		c.messages = append(c.messages, Message{Role: "assistant", Content: fullResponse})
 		c.lastTokens = int(inputTokens + outputTokens)
+		c.totalTokens += c.lastTokens
 		c.mu.Unlock()
 	}()
 
