@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"strings"
-	"sync"
 
 	"github.com/NERVsystems/llm9p/internal/llm"
 	"github.com/NERVsystems/llm9p/internal/protocol"
@@ -14,26 +13,38 @@ import (
 // CompactThreshold is the percentage of context limit at which auto-compaction triggers
 const CompactThreshold = 0.80
 
-// AskFile is the main interaction file - write a prompt, read the response
+// AskFile is the main interaction file - write a prompt, read the response.
+// It implements FidAwareFile to provide per-fid session isolation.
 type AskFile struct {
 	*protocol.BaseFile
-	client       llm.Backend
-	mu           sync.RWMutex
-	lastResponse string
+	sm *llm.SessionManager
 }
 
 // NewAskFile creates the ask file
-func NewAskFile(client llm.Backend) *AskFile {
+func NewAskFile(sm *llm.SessionManager) *AskFile {
 	return &AskFile{
 		BaseFile: protocol.NewBaseFile("ask", 0666),
-		client:   client,
+		sm:       sm,
 	}
 }
 
+// Read implements File.Read (fallback for non-fid-aware access)
 func (f *AskFile) Read(p []byte, offset int64) (int, error) {
-	f.mu.RLock()
-	content := f.lastResponse
-	f.mu.RUnlock()
+	// Without fid context, we can't return session-specific data
+	// Return empty to indicate no data available
+	return 0, io.EOF
+}
+
+// Write implements File.Write (fallback for non-fid-aware access)
+func (f *AskFile) Write(p []byte, offset int64) (int, error) {
+	// Without fid context, we can't process the request properly
+	return 0, protocol.ErrPermission
+}
+
+// ReadFid implements FidAwareFile.ReadFid
+func (f *AskFile) ReadFid(fid uint32, p []byte, offset int64) (int, error) {
+	session := f.sm.GetOrCreate(fid)
+	content := session.LastResponse()
 
 	// Add newline if not present
 	if content != "" && !strings.HasSuffix(content, "\n") {
@@ -47,7 +58,8 @@ func (f *AskFile) Read(p []byte, offset int64) (int, error) {
 	return n, nil
 }
 
-func (f *AskFile) Write(p []byte, offset int64) (int, error) {
+// WriteFid implements FidAwareFile.WriteFid
+func (f *AskFile) WriteFid(fid uint32, p []byte, offset int64) (int, error) {
 	prompt := strings.TrimSpace(string(p))
 	if prompt == "" {
 		return len(p), nil // Empty write is a no-op
@@ -56,47 +68,39 @@ func (f *AskFile) Write(p []byte, offset int64) (int, error) {
 	ctx := context.Background()
 
 	// Check if we need to auto-compact before processing
-	tokens := f.client.TotalTokens()
-	limit := f.client.ContextLimit()
+	session := f.sm.GetOrCreate(fid)
+	tokens := session.TotalTokens()
+	limit := f.sm.ContextLimit()
 	threshold := int(float64(limit) * CompactThreshold)
 
 	if tokens > threshold {
-		log.Printf("llm9p: auto-compacting at %d/%d tokens (%.0f%% threshold)",
-			tokens, limit, CompactThreshold*100)
-		if err := f.client.Compact(ctx); err != nil {
-			log.Printf("llm9p: auto-compact failed: %v", err)
-			// Continue anyway - better to try than to fail
-		} else {
-			log.Printf("llm9p: auto-compact complete, now at %d tokens",
-				f.client.TotalTokens())
-		}
+		log.Printf("llm9p: fid %d at %d/%d tokens (%.0f%% threshold) - consider resetting",
+			fid, tokens, limit, CompactThreshold*100)
+		// Note: Per-session compaction would require a different approach
+		// For now, just log a warning. Session reset via /new is the solution.
 	}
 
-	// Make the API call
-	response, err := f.client.Ask(ctx, prompt)
+	// Make the API call using the session
+	_, err := f.sm.Ask(ctx, fid, prompt)
 	if err != nil {
-		// Store error as response so it can be read
-		f.mu.Lock()
-		f.lastResponse = "Error: " + err.Error()
-		f.mu.Unlock()
+		// Error is stored in session.LastResponse by SessionManager
 		return len(p), nil // Return success so client knows write completed
 	}
-
-	f.mu.Lock()
-	f.lastResponse = response
-	f.mu.Unlock()
 
 	return len(p), nil
 }
 
+// CloseFid implements FidAwareFile.CloseFid
+func (f *AskFile) CloseFid(fid uint32) error {
+	// Clean up the session when the fid is clunked
+	f.sm.Remove(fid)
+	return nil
+}
+
+// Stat returns the file's metadata
 func (f *AskFile) Stat() protocol.Stat {
 	s := f.BaseFile.Stat()
-	f.mu.RLock()
-	content := f.lastResponse
-	f.mu.RUnlock()
-	if content != "" && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	s.Length = uint64(len(content))
+	// Length is dynamic based on session, but without fid context we return 0
+	s.Length = 0
 	return s
 }

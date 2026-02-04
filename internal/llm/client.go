@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -18,6 +19,24 @@ type Message struct {
 	Content string `json:"content"` // message content
 }
 
+// MetricsCallback is called after each LLM request with performance data
+type MetricsCallback func(inputTokens, outputTokens int, latencyMs int64)
+
+// Global metrics callback - set by llmfs to record metrics
+var metricsCallback MetricsCallback
+
+// SetMetricsCallback registers a callback for recording metrics
+func SetMetricsCallback(cb MetricsCallback) {
+	metricsCallback = cb
+}
+
+// RecordMetrics calls the registered callback if set
+func RecordMetrics(inputTokens, outputTokens int, latencyMs int64) {
+	if metricsCallback != nil {
+		metricsCallback(inputTokens, outputTokens, latencyMs)
+	}
+}
+
 // Client wraps the Anthropic API client with conversation state
 type Client struct {
 	client         anthropic.Client
@@ -25,6 +44,7 @@ type Client struct {
 	model          string
 	temperature    float64
 	systemPrompt   string
+	prefill        string // assistant response prefill for keeping model in character
 	messages       []Message
 	lastTokens     int
 	totalTokens    int // cumulative token count for context tracking
@@ -91,6 +111,20 @@ func (c *Client) SetThinkingTokens(tokens int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.thinkingTokens = tokens
+}
+
+// Prefill returns the assistant response prefill string
+func (c *Client) Prefill() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.prefill
+}
+
+// SetPrefill sets a string to prefill the assistant response
+func (c *Client) SetPrefill(prefill string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.prefill = prefill
 }
 
 // SystemPrompt returns the current system prompt
@@ -286,8 +320,11 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 		params.System = systemBlocks
 	}
 
-	// Make the API call
+	// Make the API call with timing
+	startTime := time.Now()
 	response, err := c.client.Messages.New(ctx, params)
+	latencyMs := time.Since(startTime).Milliseconds()
+
 	if err != nil {
 		// Remove the user message on error
 		c.mu.Lock()
@@ -312,6 +349,11 @@ func (c *Client) Ask(ctx context.Context, prompt string) (string, error) {
 	c.lastTokens = int(response.Usage.InputTokens + response.Usage.OutputTokens)
 	c.totalTokens += c.lastTokens
 	c.mu.Unlock()
+
+	// Record metrics (input and output tokens separately for analysis)
+	inputToks := int(response.Usage.InputTokens)
+	outputToks := int(response.Usage.OutputTokens)
+	RecordMetrics(inputToks, outputToks, latencyMs)
 
 	return responseText, nil
 }
@@ -471,4 +513,102 @@ func (c *Client) WaitStream() {
 	if done != nil {
 		<-done
 	}
+}
+
+// AskWithHistory sends a prompt with explicit message history for per-fid isolation.
+// Unlike Ask(), this does not modify the client's internal messages state.
+// Returns response text and token count.
+func (c *Client) AskWithHistory(ctx context.Context, history []Message, prompt string) (string, int, error) {
+	// Get settings with lock
+	c.mu.RLock()
+	model := c.model
+	temp := c.temperature
+	systemPrompt := c.systemPrompt
+	prefill := c.prefill
+	c.mu.RUnlock()
+
+	// Build API messages from provided history plus the new prompt
+	apiMessages := make([]anthropic.MessageParam, 0, len(history)+2)
+	var systemBlocks []anthropic.TextBlockParam
+
+	// Add dedicated system prompt first
+	if systemPrompt != "" {
+		systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
+			Text: systemPrompt,
+		})
+	}
+
+	for _, msg := range history {
+		switch msg.Role {
+		case "system":
+			systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
+				Text: msg.Content,
+			})
+		case "user":
+			apiMessages = append(apiMessages, anthropic.NewUserMessage(
+				anthropic.NewTextBlock(msg.Content),
+			))
+		case "assistant":
+			apiMessages = append(apiMessages, anthropic.NewAssistantMessage(
+				anthropic.NewTextBlock(msg.Content),
+			))
+		}
+	}
+
+	// Add the new user prompt
+	apiMessages = append(apiMessages, anthropic.NewUserMessage(
+		anthropic.NewTextBlock(prompt),
+	))
+
+	// Add prefill as partial assistant message to keep model in character
+	// The model will continue from this point
+	if prefill != "" {
+		apiMessages = append(apiMessages, anthropic.NewAssistantMessage(
+			anthropic.NewTextBlock(prefill),
+		))
+	}
+
+	// Build request params
+	params := anthropic.MessageNewParams{
+		Model:       anthropic.Model(model),
+		MaxTokens:   4096,
+		Messages:    apiMessages,
+		Temperature: anthropic.Float(temp),
+	}
+
+	// Add system prompt if present
+	if len(systemBlocks) > 0 {
+		params.System = systemBlocks
+	}
+
+	// Make the API call with timing
+	startTime := time.Now()
+	response, err := c.client.Messages.New(ctx, params)
+	latencyMs := time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		return "", 0, fmt.Errorf("API error: %w", err)
+	}
+
+	// Extract response text
+	var responseText string
+	for _, block := range response.Content {
+		if block.Type == "text" {
+			responseText += block.Text
+		}
+	}
+
+	// Prepend prefill to response (it was used as partial assistant message)
+	if prefill != "" {
+		responseText = prefill + responseText
+	}
+
+	tokens := int(response.Usage.InputTokens + response.Usage.OutputTokens)
+
+	// Record metrics
+	inputToks := int(response.Usage.InputTokens)
+	outputToks := int(response.Usage.OutputTokens)
+	RecordMetrics(inputToks, outputToks, latencyMs)
+
+	return responseText, tokens, nil
 }

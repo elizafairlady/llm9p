@@ -69,8 +69,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create session manager for per-fid isolation
+	sm := llm.NewSessionManager(client)
+
 	// Create filesystem
-	root := llmfs.NewRoot(client)
+	root := llmfs.NewRoot(sm)
 
 	// Create 9P server
 	server := protocol.NewServer(root)

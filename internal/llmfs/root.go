@@ -6,27 +6,38 @@ import (
 	"github.com/NERVsystems/llm9p/internal/protocol"
 )
 
-// NewRoot creates the root directory of the LLM filesystem
-func NewRoot(client llm.Backend) protocol.Dir {
+// NewRoot creates the root directory of the LLM filesystem.
+// It takes a SessionManager which provides per-fid session isolation
+// and access to the underlying backend for global settings.
+func NewRoot(sm *llm.SessionManager) protocol.Dir {
+	backend := sm.Backend()
 	root := protocol.NewStaticDir("llm")
 
-	// Add all files
-	root.AddChild(NewAskFile(client))
-	root.AddChild(NewModelFile(client))
-	root.AddChild(NewTemperatureFile(client))
-	root.AddChild(NewSystemFile(client))
-	root.AddChild(NewTokensFile(client))
-	root.AddChild(NewNewFile(client))
-	root.AddChild(NewContextFile(client))
-	root.AddChild(NewThinkingFile(client))
-	root.AddChild(NewExampleFile())
-	root.AddChild(NewUsageFile(client))
-	root.AddChild(NewCompactFile(client))
+	// Session-aware files (per-fid isolation)
+	root.AddChild(NewAskFile(sm))
+	root.AddChild(NewNewFile(sm))
+	root.AddChild(NewContextFile(sm))
 
-	// Add stream directory
+	// Global settings files (shared across all fids)
+	root.AddChild(NewModelFile(backend))
+	root.AddChild(NewTemperatureFile(backend))
+	root.AddChild(NewSystemFile(backend))
+	root.AddChild(NewThinkingFile(backend))
+	root.AddChild(NewPrefillFile(backend))
+
+	// Token tracking (uses backend's global counters)
+	root.AddChild(NewTokensFile(backend))
+	root.AddChild(NewUsageFile(backend))
+	root.AddChild(NewMetricsFile(backend))
+	root.AddChild(NewCompactFile(backend))
+
+	// Static files
+	root.AddChild(NewExampleFile())
+
+	// Add stream directory (uses backend directly)
 	streamDir := protocol.NewStaticDir("stream")
-	streamDir.AddChild(NewStreamAskFile(client))
-	streamDir.AddChild(NewChunkFile(client))
+	streamDir.AddChild(NewStreamAskFile(backend))
+	streamDir.AddChild(NewChunkFile(backend))
 	root.AddChild(streamDir)
 
 	return root

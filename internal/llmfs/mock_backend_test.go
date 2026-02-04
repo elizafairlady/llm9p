@@ -12,6 +12,7 @@ type MockBackend struct {
 	model          string
 	temperature    float64
 	systemPrompt   string
+	prefill        string
 	messages       []llm.Message
 	lastTokens     int
 	totalTokens    int
@@ -46,6 +47,8 @@ func (m *MockBackend) SystemPrompt() string          { return m.systemPrompt }
 func (m *MockBackend) SetSystemPrompt(prompt string) { m.systemPrompt = prompt }
 func (m *MockBackend) ThinkingTokens() int           { return m.thinkingTokens }
 func (m *MockBackend) SetThinkingTokens(tokens int)  { m.thinkingTokens = tokens }
+func (m *MockBackend) Prefill() string               { return m.prefill }
+func (m *MockBackend) SetPrefill(prefill string)     { m.prefill = prefill }
 func (m *MockBackend) LastTokens() int               { return m.lastTokens }
 func (m *MockBackend) TotalTokens() int              { return m.totalTokens }
 func (m *MockBackend) ContextLimit() int             { return m.contextLimit }
@@ -90,6 +93,14 @@ func (m *MockBackend) Ask(ctx context.Context, prompt string) (string, error) {
 	m.lastTokens = len(prompt) + len(m.askResponse)
 	m.totalTokens += m.lastTokens
 	return m.askResponse, nil
+}
+
+func (m *MockBackend) AskWithHistory(ctx context.Context, history []llm.Message, prompt string) (string, int, error) {
+	if m.askError != nil {
+		return "", 0, m.askError
+	}
+	tokens := len(prompt) + len(m.askResponse)
+	return m.askResponse, tokens, nil
 }
 
 func (m *MockBackend) StartStream(ctx context.Context, prompt string) error {

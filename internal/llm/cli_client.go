@@ -19,6 +19,7 @@ type CLIClient struct {
 	model          string
 	temperature    float64
 	systemPrompt   string
+	prefill        string // assistant response prefill for keeping model in character
 	messages       []Message
 	lastTokens     int
 	totalTokens    int // cumulative estimated token count
@@ -103,6 +104,20 @@ func (c *CLIClient) SetThinkingTokens(tokens int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.thinkingTokens = tokens
+}
+
+// Prefill returns the assistant response prefill string
+func (c *CLIClient) Prefill() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.prefill
+}
+
+// SetPrefill sets a string to prefill the assistant response
+func (c *CLIClient) SetPrefill(prefill string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.prefill = prefill
 }
 
 // SystemPrompt returns the current system prompt
@@ -548,4 +563,95 @@ func (c *CLIClient) WaitStream() {
 	if done != nil {
 		<-done
 	}
+}
+
+// AskWithHistory sends a prompt with explicit message history for per-fid isolation.
+// Unlike Ask(), this does not modify the client's internal messages state.
+// Returns response text and estimated token count.
+func (c *CLIClient) AskWithHistory(ctx context.Context, history []Message, prompt string) (string, int, error) {
+	// Get settings with lock
+	c.mu.RLock()
+	model := c.model
+	thinkingTokens := c.thinkingTokens
+	systemPromptSetting := c.systemPrompt
+	prefill := c.prefill
+	c.mu.RUnlock()
+
+	// Build prompt from provided history
+	var parts []string
+	var systemParts []string
+
+	// Add dedicated system prompt first
+	if systemPromptSetting != "" {
+		systemParts = append(systemParts, systemPromptSetting)
+	}
+
+	for _, msg := range history {
+		switch msg.Role {
+		case "system":
+			systemParts = append(systemParts, msg.Content)
+		case "user":
+			parts = append(parts, fmt.Sprintf("Human: %s", msg.Content))
+		case "assistant":
+			parts = append(parts, fmt.Sprintf("Assistant: %s", msg.Content))
+		}
+	}
+
+	// Add the new user prompt
+	parts = append(parts, fmt.Sprintf("Human: %s", prompt))
+
+	fullPrompt := strings.Join(parts, "\n\n")
+	systemPrompt := strings.Join(systemParts, "\n\n")
+
+	// Build claude CLI command
+	args := []string{
+		"--print",
+		"--output-format", "json",
+		"--model", model,
+		"--allowedTools", "",
+		"--dangerously-skip-permissions",
+	}
+
+	if systemPrompt != "" {
+		args = append(args, "--system-prompt", systemPrompt)
+	}
+
+	args = append(args, "-") // Read from stdin
+
+	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd.Stdin = bytes.NewBufferString(fullPrompt)
+
+	// Set thinking token budget via environment variable
+	cmd.Env = append(cmd.Environ(), func() string {
+		if thinkingTokens < 0 {
+			return "MAX_THINKING_TOKENS=31999"
+		}
+		return fmt.Sprintf("MAX_THINKING_TOKENS=%d", thinkingTokens)
+	}())
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", 0, fmt.Errorf("claude CLI error: %w (stderr: %s)", err, stderr.String())
+	}
+
+	// Parse JSON response
+	responseText, err := parseJSONResponse(stdout.String())
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to parse CLI response: %w", err)
+	}
+
+	// Prepend prefill to response to keep model in character
+	// Note: CLI doesn't support true prefill (partial assistant message),
+	// so we prepend it to the response for consistent behavior with API client
+	if prefill != "" {
+		responseText = prefill + responseText
+	}
+
+	// Estimate tokens: prompt + response (chars / 4)
+	tokens := estimateTokens(fullPrompt) + estimateTokens(responseText)
+
+	return responseText, tokens, nil
 }

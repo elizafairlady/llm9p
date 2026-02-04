@@ -22,6 +22,11 @@ type Backend interface {
 	ThinkingTokens() int
 	// SetThinkingTokens sets the thinking token budget
 	SetThinkingTokens(tokens int)
+	// Prefill returns the assistant response prefill string
+	Prefill() string
+	// SetPrefill sets a string to prefill the assistant response
+	// This helps keep the model in character (e.g., "[Veltro] ")
+	SetPrefill(prefill string)
 	// LastTokens returns token count from last response
 	LastTokens() int
 	// TotalTokens returns cumulative token count for this conversation
@@ -41,6 +46,9 @@ type Backend interface {
 	Reset()
 	// Ask sends a prompt and returns the response (blocking)
 	Ask(ctx context.Context, prompt string) (string, error)
+	// AskWithHistory sends a prompt with explicit message history (for per-fid isolation)
+	// Returns response text and token count
+	AskWithHistory(ctx context.Context, history []Message, prompt string) (string, int, error)
 	// StartStream begins streaming a response
 	StartStream(ctx context.Context, prompt string) error
 	// ReadStreamChunk reads the next streaming chunk

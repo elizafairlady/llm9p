@@ -3,20 +3,23 @@ package llmfs
 import (
 	"io"
 	"testing"
+
+	"github.com/NERVsystems/llm9p/internal/llm"
 )
 
 func TestAskFile_Read_Empty(t *testing.T) {
 	mock := NewMockBackend()
-	ask := NewAskFile(mock)
+	sm := llm.NewSessionManager(mock)
+	ask := NewAskFile(sm)
 
-	// Initial read should be empty (EOF)
+	// Initial read with fid should be empty (EOF)
 	buf := make([]byte, 100)
-	n, err := ask.Read(buf, 0)
+	n, err := ask.ReadFid(1, buf, 0)
 	if err != io.EOF {
-		t.Errorf("Read() error = %v, want io.EOF", err)
+		t.Errorf("ReadFid() error = %v, want io.EOF", err)
 	}
 	if n != 0 {
-		t.Errorf("Read() n = %d, want 0", n)
+		t.Errorf("ReadFid() n = %d, want 0", n)
 	}
 }
 
@@ -24,49 +27,55 @@ func TestAskFile_WriteRead(t *testing.T) {
 	mock := NewMockBackend()
 	mock.askResponse = "Hello, I'm Claude!"
 
-	ask := NewAskFile(mock)
+	sm := llm.NewSessionManager(mock)
+	ask := NewAskFile(sm)
+
+	fid := uint32(1)
 
 	// Write a prompt
 	prompt := "Hello!"
-	n, err := ask.Write([]byte(prompt), 0)
+	n, err := ask.WriteFid(fid, []byte(prompt), 0)
 	if err != nil {
-		t.Fatalf("Write() error: %v", err)
+		t.Fatalf("WriteFid() error: %v", err)
 	}
 	if n != len(prompt) {
-		t.Errorf("Write() n = %d, want %d", n, len(prompt))
+		t.Errorf("WriteFid() n = %d, want %d", n, len(prompt))
 	}
 
 	// Read response
 	buf := make([]byte, 100)
-	readN, err := ask.Read(buf, 0)
+	readN, err := ask.ReadFid(fid, buf, 0)
 	if err != nil {
-		t.Fatalf("Read() error: %v", err)
+		t.Fatalf("ReadFid() error: %v", err)
 	}
 
 	response := string(buf[:readN])
 	expected := "Hello, I'm Claude!\n"
 	if response != expected {
-		t.Errorf("Read() = %q, want %q", response, expected)
+		t.Errorf("ReadFid() = %q, want %q", response, expected)
 	}
 }
 
 func TestAskFile_Write_EmptyNoOp(t *testing.T) {
 	mock := NewMockBackend()
-	ask := NewAskFile(mock)
+	sm := llm.NewSessionManager(mock)
+	ask := NewAskFile(sm)
+
+	fid := uint32(1)
 
 	// Empty write should be no-op
-	n, err := ask.Write([]byte(""), 0)
+	n, err := ask.WriteFid(fid, []byte(""), 0)
 	if err != nil {
-		t.Fatalf("Write() error: %v", err)
+		t.Fatalf("WriteFid() error: %v", err)
 	}
 	if n != 0 {
-		t.Errorf("Write('') n = %d, want 0", n)
+		t.Errorf("WriteFid('') n = %d, want 0", n)
 	}
 
 	// Whitespace-only also no-op
-	n, err = ask.Write([]byte("   \n\t  "), 0)
+	n, err = ask.WriteFid(fid, []byte("   \n\t  "), 0)
 	if err != nil {
-		t.Fatalf("Write() error: %v", err)
+		t.Fatalf("WriteFid() error: %v", err)
 	}
 }
 
@@ -74,88 +83,89 @@ func TestAskFile_Write_Error(t *testing.T) {
 	mock := NewMockBackend()
 	mock.askError = io.ErrUnexpectedEOF
 
-	ask := NewAskFile(mock)
+	sm := llm.NewSessionManager(mock)
+	ask := NewAskFile(sm)
+
+	fid := uint32(1)
 
 	// Write should succeed (error is stored for read)
-	n, err := ask.Write([]byte("test"), 0)
+	n, err := ask.WriteFid(fid, []byte("test"), 0)
 	if err != nil {
-		t.Fatalf("Write() error: %v", err)
+		t.Fatalf("WriteFid() error: %v", err)
 	}
 	if n != 4 {
-		t.Errorf("Write() n = %d, want 4", n)
+		t.Errorf("WriteFid() n = %d, want 4", n)
 	}
 
 	// Read should return the error
 	buf := make([]byte, 100)
-	readN, _ := ask.Read(buf, 0)
+	readN, _ := ask.ReadFid(fid, buf, 0)
 	response := string(buf[:readN])
 
-	if response[:6] != "Error:" {
-		t.Errorf("Read() = %q, should start with 'Error:'", response)
+	if len(response) < 6 || response[:6] != "Error:" {
+		t.Errorf("ReadFid() = %q, should start with 'Error:'", response)
 	}
 }
 
-func TestAskFile_AutoCompaction_BelowThreshold(t *testing.T) {
+func TestAskFile_SessionIsolation(t *testing.T) {
 	mock := NewMockBackend()
-	mock.totalTokens = 100000  // 50% of 200K, below 80% threshold
-	mock.contextLimit = 200000
 	mock.askResponse = "response"
 
-	ask := NewAskFile(mock)
+	sm := llm.NewSessionManager(mock)
+	ask := NewAskFile(sm)
 
-	// Write should NOT trigger compaction
-	ask.Write([]byte("test"), 0)
+	fid1 := uint32(1)
+	fid2 := uint32(2)
 
-	if mock.compactCalled {
-		t.Error("Compact() should not be called below threshold")
+	// Write to fid1
+	mock.askResponse = "response for fid1"
+	ask.WriteFid(fid1, []byte("prompt1"), 0)
+
+	// Write to fid2
+	mock.askResponse = "response for fid2"
+	ask.WriteFid(fid2, []byte("prompt2"), 0)
+
+	// Read from fid1 - should get fid1's response
+	buf := make([]byte, 100)
+	n, _ := ask.ReadFid(fid1, buf, 0)
+	response1 := string(buf[:n])
+	if response1 != "response for fid1\n" {
+		t.Errorf("fid1 ReadFid() = %q, want %q", response1, "response for fid1\n")
+	}
+
+	// Read from fid2 - should get fid2's response
+	n, _ = ask.ReadFid(fid2, buf, 0)
+	response2 := string(buf[:n])
+	if response2 != "response for fid2\n" {
+		t.Errorf("fid2 ReadFid() = %q, want %q", response2, "response for fid2\n")
 	}
 }
 
-func TestAskFile_AutoCompaction_AboveThreshold(t *testing.T) {
+func TestAskFile_CloseFid(t *testing.T) {
 	mock := NewMockBackend()
-	mock.totalTokens = 170000  // 85% of 200K, above 80% threshold
-	mock.contextLimit = 200000
 	mock.askResponse = "response"
 
-	ask := NewAskFile(mock)
+	sm := llm.NewSessionManager(mock)
+	ask := NewAskFile(sm)
 
-	// Write SHOULD trigger compaction
-	ask.Write([]byte("test"), 0)
+	fid := uint32(1)
 
-	if !mock.compactCalled {
-		t.Error("Compact() should be called when above threshold")
+	// Write to create session
+	ask.WriteFid(fid, []byte("test"), 0)
+
+	// Session should exist
+	session := sm.Get(fid)
+	if session == nil {
+		t.Fatal("session should exist after WriteFid")
 	}
-}
 
-func TestAskFile_AutoCompaction_ExactThreshold(t *testing.T) {
-	mock := NewMockBackend()
-	mock.totalTokens = 160000  // Exactly 80% of 200K
-	mock.contextLimit = 200000
-	mock.askResponse = "response"
+	// Close the fid
+	ask.CloseFid(fid)
 
-	ask := NewAskFile(mock)
-
-	// Write should NOT trigger (we use > not >=)
-	ask.Write([]byte("test"), 0)
-
-	if mock.compactCalled {
-		t.Error("Compact() should not be called at exactly threshold")
-	}
-}
-
-func TestAskFile_AutoCompaction_JustAboveThreshold(t *testing.T) {
-	mock := NewMockBackend()
-	mock.totalTokens = 160001  // Just over 80%
-	mock.contextLimit = 200000
-	mock.askResponse = "response"
-
-	ask := NewAskFile(mock)
-
-	// Write SHOULD trigger compaction
-	ask.Write([]byte("test"), 0)
-
-	if !mock.compactCalled {
-		t.Error("Compact() should be called when just above threshold")
+	// Session should be removed
+	session = sm.Get(fid)
+	if session != nil {
+		t.Error("session should be removed after CloseFid")
 	}
 }
 
@@ -163,35 +173,29 @@ func TestAskFile_Stat(t *testing.T) {
 	mock := NewMockBackend()
 	mock.askResponse = "Hello!"
 
-	ask := NewAskFile(mock)
+	sm := llm.NewSessionManager(mock)
+	ask := NewAskFile(sm)
 
-	// Initial stat - no response yet
+	// Stat without fid context returns 0 length
 	stat := ask.Stat()
 	if stat.Length != 0 {
-		t.Errorf("Stat().Length = %d, want 0 (no response yet)", stat.Length)
-	}
-
-	// Write to get a response
-	ask.Write([]byte("test"), 0)
-
-	// Stat should now show response length (with newline)
-	stat = ask.Stat()
-	expected := uint64(len("Hello!\n"))
-	if stat.Length != expected {
-		t.Errorf("Stat().Length = %d, want %d", stat.Length, expected)
+		t.Errorf("Stat().Length = %d, want 0", stat.Length)
 	}
 }
 
 func TestAskFile_ResponseNewline(t *testing.T) {
 	mock := NewMockBackend()
+	sm := llm.NewSessionManager(mock)
+
+	fid := uint32(1)
 
 	// Response without trailing newline
 	mock.askResponse = "No newline"
-	ask := NewAskFile(mock)
-	ask.Write([]byte("test"), 0)
+	ask := NewAskFile(sm)
+	ask.WriteFid(fid, []byte("test"), 0)
 
 	buf := make([]byte, 100)
-	n, _ := ask.Read(buf, 0)
+	n, _ := ask.ReadFid(fid, buf, 0)
 	response := string(buf[:n])
 
 	// Should have newline added
@@ -199,12 +203,14 @@ func TestAskFile_ResponseNewline(t *testing.T) {
 		t.Errorf("Response should end with newline, got %q", response)
 	}
 
+	// New session for second test
+	fid2 := uint32(2)
+
 	// Response with trailing newline already
 	mock.askResponse = "Has newline\n"
-	ask2 := NewAskFile(mock)
-	ask2.Write([]byte("test"), 0)
+	ask.WriteFid(fid2, []byte("test"), 0)
 
-	n, _ = ask2.Read(buf, 0)
+	n, _ = ask.ReadFid(fid2, buf, 0)
 	response = string(buf[:n])
 
 	// Should NOT double the newline
