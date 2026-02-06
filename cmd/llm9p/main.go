@@ -1,4 +1,4 @@
-// llm9p exposes an LLM (Claude) as a 9P filesystem.
+// llm9p exposes an LLM as a 9P filesystem.
 //
 // Usage:
 //
@@ -7,6 +7,11 @@
 // Or with Claude Max subscription (via Claude Code CLI):
 //
 //	llm9p -addr :5640 -backend cli
+//
+// Or with Ollama (local LLM inference):
+//
+//	llm9p -addr :5640 -backend ollama
+//	llm9p -addr :5640 -backend ollama -ollama-url http://10.0.2.2:11434
 //
 // Mount with:
 //
@@ -37,7 +42,8 @@ import (
 func main() {
 	addr := flag.String("addr", ":5640", "Address to listen on")
 	debug := flag.Bool("debug", false, "Enable debug logging")
-	backend := flag.String("backend", "api", "Backend to use: 'api' (Anthropic API) or 'cli' (Claude Code CLI for Max subscription)")
+	backend := flag.String("backend", "api", "Backend to use: 'api' (Anthropic API), 'cli' (Claude Code CLI), or 'ollama' (local Ollama)")
+	ollamaURL := flag.String("ollama-url", "http://localhost:11434", "Ollama API URL (for -backend ollama)")
 	flag.Parse()
 
 	var client llm.Backend
@@ -64,8 +70,12 @@ func main() {
 		client = llm.NewClient(apiKey)
 		log.Println("Using Anthropic API backend")
 
+	case "ollama":
+		client = llm.NewOllamaClient(*ollamaURL)
+		log.Printf("Using Ollama backend at %s", *ollamaURL)
+
 	default:
-		fmt.Fprintf(os.Stderr, "Error: unknown backend '%s' (use 'api' or 'cli')\n", *backend)
+		fmt.Fprintf(os.Stderr, "Error: unknown backend '%s' (use 'api', 'cli', or 'ollama')\n", *backend)
 		os.Exit(1)
 	}
 

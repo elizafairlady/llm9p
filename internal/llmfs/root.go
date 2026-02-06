@@ -28,7 +28,6 @@ func NewRoot(sm *llm.SessionManager) protocol.Dir {
 	// Token tracking (uses backend's global counters)
 	root.AddChild(NewTokensFile(backend))
 	root.AddChild(NewUsageFile(backend))
-	root.AddChild(NewMetricsFile(backend))
 	root.AddChild(NewCompactFile(backend))
 
 	// Static files
