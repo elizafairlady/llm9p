@@ -7,36 +7,34 @@ import (
 )
 
 // NewRoot creates the root directory of the LLM filesystem.
-// It takes a SessionManager which provides per-fid session isolation
-// and access to the underlying backend for global settings.
-func NewRoot(sm *llm.SessionManager) protocol.Dir {
-	backend := sm.Backend()
+// It takes a Backend which provides access to the LLM.
+func NewRoot(client llm.Backend) protocol.Dir {
 	root := protocol.NewStaticDir("llm")
 
-	// Session-aware files (per-fid isolation)
-	root.AddChild(NewAskFile(sm))
-	root.AddChild(NewNewFile(sm))
-	root.AddChild(NewContextFile(sm))
+	// Core interaction files
+	root.AddChild(NewAskFile(client))
+	root.AddChild(NewNewFile(client))
+	root.AddChild(NewContextFile(client))
 
-	// Global settings files (shared across all fids)
-	root.AddChild(NewModelFile(backend))
-	root.AddChild(NewTemperatureFile(backend))
-	root.AddChild(NewSystemFile(backend))
-	root.AddChild(NewThinkingFile(backend))
-	root.AddChild(NewPrefillFile(backend))
+	// Settings files
+	root.AddChild(NewModelFile(client))
+	root.AddChild(NewTemperatureFile(client))
+	root.AddChild(NewSystemFile(client))
+	root.AddChild(NewThinkingFile(client))
+	root.AddChild(NewPrefillFile(client))
 
-	// Token tracking (uses backend's global counters)
-	root.AddChild(NewTokensFile(backend))
-	root.AddChild(NewUsageFile(backend))
-	root.AddChild(NewCompactFile(backend))
+	// Token tracking
+	root.AddChild(NewTokensFile(client))
+	root.AddChild(NewUsageFile(client))
+	root.AddChild(NewCompactFile(client))
 
 	// Static files
 	root.AddChild(NewExampleFile())
 
-	// Add stream directory (uses backend directly)
+	// Stream directory
 	streamDir := protocol.NewStaticDir("stream")
-	streamDir.AddChild(NewStreamAskFile(backend))
-	streamDir.AddChild(NewChunkFile(backend))
+	streamDir.AddChild(NewStreamAskFile(client))
+	streamDir.AddChild(NewChunkFile(client))
 	root.AddChild(streamDir)
 
 	return root
